@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RSS News Aggregator with Wordcloud</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3-cloud/1.2.5/d3.layout.cloud.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .control-panel {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        input[type="text"] {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        /* Tab styling */
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid #ddd;
+            margin-bottom: 20px;
+        }
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            border-bottom: none;
+            margin-bottom: -1px;
+            background-color: #f1f1f1;
+            border-top-left-radius: 4px;
+            border-top-right-radius: 4px;
+            margin-right: 5px;
+        }
+        .tab.active {
+            background-color: #fff;
+            border-color: #ddd;
+            border-bottom-color: #fff;
+        }
+        .tab-content {
+            display: none;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 0 0 8px 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .tab-content.active {
+            display: block;
+        }
+        
+        .feed-sources {
+            width: 100%;
+        }
+        .feed-source {
+            padding: 10px;
+            margin-bottom: 5px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .feed-source button {
+            background-color: #f44336;
+            padding: 5px 10px;
+        }
+        .wordcloud-container {
+            width: 100%;
+            height: 400px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #wordcloud {
+            width: 100%;
+            height: 100%;
+        }
+        .news-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .article {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .article h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .article .date {
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+        }
+        .article .summary {
+            color: #444;
+            line-height: 1.5;
+        }
+        .article a {
+            display: inline-block;
+            margin-top: 10px;
+            color: #4CAF50;
+            text-decoration: none;
+        }
+        .article a:hover {
+            text-decoration: underline;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 18px;
+            color: #666;
+        }
+        .error {
+            background-color: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Reddit News Aggregator</h1>
+        
+        <div class="control-panel">
+            <div class="input-group">
+                <input type="text" id="rssUrl" placeholder="Enter Reddit JSON URL (e.g., https://www.reddit.com/r/technology/.json)">
+                <button id="addFeed">Add Feed</button>
+            </div>
+            <button id="refreshAll">Refresh All Feeds</button>
+            <div id="error" class="error" style="display: none;"></div>
+        </div>
+        
+        <!-- Tabs -->
+        <div class="tabs">
+            <div class="tab active" data-tab="feeds">Feed Sources</div>
+            <div class="tab" data-tab="wordcloud">Word Cloud</div>
+            <div class="tab" data-tab="articles">News Articles</div>
+        </div>
+        
+        <!-- Tab Content -->
+        <div id="feeds-tab" class="tab-content active">
+            <div class="feed-sources">
+                <h2>Feed Sources</h2>
+                <div id="feedList"></div>
+            </div>
+        </div>
+        
+        <div id="wordcloud-tab" class="tab-content">
+            <div class="wordcloud-container">
+                <div id="wordcloud"></div>
+            </div>
+        </div>
+        
+        <div id="articles-tab" class="tab-content">
+            <h2>News Articles</h2>
+            <div id="newsContainer" class="news-container">
+                <div class="loading">Add a feed to see news articles</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        $(document).ready(function() {
+            // Store feeds and articles
+            let feeds = [];
+            let allArticles = [];
+            
+            // Sample JSON feeds to start with
+            const sampleFeeds = [
+                'https://www.reddit.com/r/technology/.json',
+                'https://www.reddit.com/r/worldnews/.json'
+            ];
+            
+            // Initialize with sample feeds
+            sampleFeeds.forEach(feed => {
+                if (!feeds.includes(feed)) {
+                    feeds.push(feed);
+                }
+            });
+            
+            // Tab functionality
+            $('.tab').click(function() {
+                // Remove active class from all tabs and content
+                $('.tab').removeClass('active');
+                $('.tab-content').removeClass('active');
+                
+                // Add active class to clicked tab and corresponding content
+                $(this).addClass('active');
+                const tabId = $(this).data('tab');
+                $(`#${tabId}-tab`).addClass('active');
+            });
+            
+            // Update feed list UI
+            updateFeedList();
+            
+            // Initial load of feeds
+            $('#refreshAll').click();
+            
+            // Add new feed
+            $('#addFeed').click(function() {
+                const feedUrl = $('#rssUrl').val().trim();
+                if (feedUrl) {
+                    if (!feeds.includes(feedUrl)) {
+                        feeds.push(feedUrl);
+                        updateFeedList();
+                        fetchFeed(feedUrl);
+                        $('#rssUrl').val('');
+                    } else {
+                        showError('This feed is already added');
+                    }
+                } else {
+                    showError('Please enter a valid RSS feed URL');
+                }
+            });
+            
+            // Refresh all feeds
+            $('#refreshAll').click(function() {
+                if (feeds.length > 0) {
+                    allArticles = [];
+                    $('#newsContainer').html('<div class="loading">Loading feeds...</div>');
+                    feeds.forEach(feed => fetchFeed(feed));
+                } else {
+                    showError('No feeds to refresh');
+                }
+            });
+            
+            // Update the feed list in the UI
+            function updateFeedList() {
+                const feedList = $('#feedList');
+                feedList.empty();
+                
+                if (feeds.length === 0) {
+                    feedList.html('<p>No feeds added yet</p>');
+                    return;
+                }
+                
+                feeds.forEach((feed, index) => {
+                    const feedElement = $(`
+                        <div class="feed-source">
+                            <span>${feed}</span>
+                            <button class="remove-feed" data-index="${index}">Remove</button>
+                        </div>
+                    `);
+                    feedList.append(feedElement);
+                });
+                
+                // Handle remove button clicks
+                $('.remove-feed').click(function() {
+                    const index = $(this).data('index');
+                    feeds.splice(index, 1);
+                    updateFeedList();
+                    
+                    // Refresh articles if there are still feeds
+                    if (feeds.length > 0) {
+                        allArticles = [];
+                        $('#newsContainer').html('<div class="loading">Refreshing feeds...</div>');
+                        feeds.forEach(feed => fetchFeed(feed));
+                    } else {
+                        allArticles = [];
+                        $('#newsContainer').html('<div class="loading">Add an RSS feed to see news articles</div>');
+                        generateWordCloud([]);
+                    }
+                });
+                
+                // We'll handle feed fetching through the refresh button instead
+                // This ensures consistent behavior between initial load and manual refresh
+            }
+            
+            // Fetch JSON feed
+            function fetchFeed(feedUrl) {
+                $.ajax({
+                    url: feedUrl,
+                    dataType: 'json',
+                    success: function(data) {
+                        // Detect if it's a Reddit JSON feed
+                        if (feedUrl.includes('reddit.com') && data.data && data.data.children) {
+                            parseRedditJSON(data, feedUrl);
+                        } else {
+                            // Add more JSON feed types here as needed
+                            showError(`Unknown JSON feed format: ${feedUrl}`);
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        showError(`Failed to load feed: ${feedUrl}. Error: ${error}`);
+                    }
+                });
+            }
+            
+            // Parse Reddit JSON feed
+            function parseRedditJSON(json, feedUrl) {
+                try {
+                    const articles = [];
+                    
+                    if (json.data && json.data.children) {
+                        json.data.children.forEach(post => {
+                            const data = post.data;
+                            
+                            // Skip stickied posts
+                            if (data.stickied) return;
+                            
+                            const title = data.title || "No title";
+                            const link = `https://www.reddit.com${data.permalink}`;
+                            
+                            // Get text content or use the URL if it's a link post
+                            let description = data.selftext || "";
+                            if (!description && data.url) {
+                                description = `Link to: ${data.url}`;
+                            }
+                            
+                            // Limit summary length
+                            const summary = description.substring(0, 200) + (description.length > 200 ? "..." : "");
+                            
+                            // Convert Unix timestamp to date
+                            const date = new Date(data.created_utc * 1000);
+                            
+                            // Subreddit info for source
+                            const subreddit = data.subreddit_name_prefixed || "";
+                            
+                            articles.push({
+                                title,
+                                link,
+                                summary,
+                                fullDescription: description,
+                                date,
+                                source: `${subreddit} (${feedUrl})`
+                            });
+                        });
+                    }
+                    
+                    // Add to all articles
+                    allArticles = allArticles.concat(articles);
+                    
+                    // Sort all articles by date
+                    allArticles.sort((a, b) => b.date - a.date);
+                    
+                    // Update UI
+                    displayArticles(allArticles);
+                    generateWordCloud(allArticles);
+                    
+                    // Show articles tab if this is the first load
+                    if (feeds.length === 1 && allArticles.length > 0) {
+                        $('.tab[data-tab="articles"]').click();
+                    }
+                    
+                } catch (e) {
+                    showError(`Failed to parse feed: ${feedUrl}. Error: ${e.message}`);
+                }
+            }
+            
+            // Display articles in the UI
+            function displayArticles(articles) {
+                const newsContainer = $('#newsContainer');
+                newsContainer.empty();
+                
+                if (articles.length === 0) {
+                    newsContainer.html('<div class="loading">No articles found</div>');
+                    return;
+                }
+                
+                articles.forEach(article => {
+                    const formattedDate = article.date.toLocaleString();
+                    const articleElement = $(`
+                        <div class="article">
+                            <h3>${article.title}</h3>
+                            <div class="date">${formattedDate}</div>
+                            <div class="summary">${article.summary}</div>
+                            <a href="${article.link}" target="_blank">Read more</a>
+                        </div>
+                    `);
+                    newsContainer.append(articleElement);
+                });
+            }
+            
+            // Generate word cloud
+            function generateWordCloud(articles) {
+                // Extract text from all articles
+                let text = articles.map(article => {
+                    return `${article.title} ${article.summary}`;
+                }).join(" ");
+                
+                // Process text for word cloud
+                const words = processTextForWordCloud(text);
+                
+                if (words.length === 0) {
+                    $('#wordcloud').html('<div style="text-align: center;">No words to display. Add RSS feeds to generate a word cloud.</div>');
+                    return;
+                }
+                
+                // Clear previous word cloud
+                $('#wordcloud').empty();
+                
+                // Set up D3 word cloud
+                const width = $('#wordcloud').width();
+                const height = $('#wordcloud').height();
+                
+                const layout = d3.layout.cloud()
+                    .size([width, height])
+                    .words(words.map(d => ({ text: d.text, size: 10 + d.size * 90 })))
+                    .padding(5)
+                    .rotate(() => 0)
+                    .font("Impact")
+                    .fontSize(d => d.size)
+                    .on("end", draw);
+                
+                layout.start();
+                
+                function draw(words) {
+                    d3.select("#wordcloud").append("svg")
+                        .attr("width", layout.size()[0])
+                        .attr("height", layout.size()[1])
+                        .append("g")
+                        .attr("transform", `translate(${layout.size()[0] / 2},${layout.size()[1] / 2})`)
+                        .selectAll("text")
+                        .data(words)
+                        .enter().append("text")
+                        .style("font-family", "Impact")
+                        .style("font-size", d => `${d.size}px`)
+                        .style("fill", () => d3.schemeCategory10[Math.floor(Math.random() * 10)])
+                        .attr("text-anchor", "middle")
+                        .attr("transform", d => `translate(${d.x},${d.y}) rotate(${d.rotate})`)
+                        .text(d => d.text);
+                }
+            }
+            
+            // Process text for word cloud
+            function processTextForWordCloud(text) {
+                // Convert to lowercase and remove special characters
+                text = text.toLowerCase().replace(/[^\w\s]/g, '');
+                
+                // Split into words
+                const words = text.split(/\s+/);
+                
+                // Common stop words to exclude
+                const stopWords = new Set([
+                    'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'with', 
+                    'by', 'about', 'as', 'of', 'from', 'this', 'that', 'these', 'those', 'is', 
+                    'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 
+                    'does', 'did', 'will', 'would', 'shall', 'should', 'can', 'could', 'may', 
+                    'might', 'must', 'it', 'its', 'it\'s', 'they', 'them', 'their', 'he', 'him', 
+                    'his', 'she', 'her', 'hers', 'we', 'us', 'our', 'ours', 'you', 'your', 'yours',
+                    'i', 'me', 'my', 'mine'
+                ]);
+                
+                // Count word frequencies
+                const wordCounts = {};
+                words.forEach(word => {
+                    if (word.length > 2 && !stopWords.has(word)) {
+                        wordCounts[word] = (wordCounts[word] || 0) + 1;
+                    }
+                });
+                
+                // Convert to array and sort by frequency
+                const wordArray = Object.keys(wordCounts).map(text => ({
+                    text,
+                    size: Math.min(0.5, wordCounts[text] / 20) // Normalize size
+                }));
+                
+                // Sort by frequency and take top 100
+                return wordArray
+                    .sort((a, b) => b.size - a.size)
+                    .slice(0, 100);
+            }
+            
+            // Show error message
+            function showError(message) {
+                const errorElement = $('#error');
+                errorElement.text(message);
+                errorElement.show();
+                
+                // Hide after 5 seconds
+                setTimeout(() => {
+                    errorElement.hide();
+                }, 5000);
+            }
+        });
+    </script>
+</body>
+</html>
